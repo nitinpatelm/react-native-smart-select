@@ -1,0 +1,9 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "baseUrl": "./",
+    "paths": {
+      "react-native-smart-select": ["../src/index"], //Add alias for package here
+    }
+  }
+}
