@@ -5,7 +5,8 @@ import {
     useRef,
     useImperativeHandle,
     forwardRef,
-    useMemo
+    useMemo,
+    useEffect
 } from 'react';
 import {
     View,
@@ -15,9 +16,15 @@ import {
     FlatList,
     StyleSheet,
     TouchableWithoutFeedback,
-    TextInput
+    TextInput,
+    Animated,
+    Easing,
+    Dimensions,
+    Platform
 } from 'react-native';
 import { type SelectFieldProps, type SelectFieldRef, type SelectOption } from '../../types/index.types';
+
+const { height: WINDOW_HEIGHT } = Dimensions.get('window');
 
 const SelectField = forwardRef<SelectFieldRef, SelectFieldProps>(
     (props, ref) => {
@@ -48,11 +55,47 @@ const SelectField = forwardRef<SelectFieldRef, SelectFieldProps>(
         const [searchQuery, setSearchQuery] = useState('');
         const searchInputRef = useRef<any>(null);
 
+        // Animation values
+        const slideAnim = useRef(new Animated.Value(0)).current;
+        const fadeAnim = useRef(new Animated.Value(0)).current;
+
         useImperativeHandle(ref, () => ({
             open: () => !disabled && setModalVisible(true),
             close: () => setModalVisible(false),
             focus: () => searchInputRef.current?.focus()
         }));
+
+        // Animation effects
+        useEffect(() => {
+            if (modalVisible) {
+                Animated.parallel([
+                    Animated.timing(fadeAnim, {
+                        toValue: 1,
+                        duration: 150,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(slideAnim, {
+                        toValue: 1,
+                        duration: 250,
+                        easing: Easing.out(Easing.cubic),
+                        useNativeDriver: true,
+                    }),
+                ]).start();
+            } else {
+                Animated.parallel([
+                    Animated.timing(fadeAnim, {
+                        toValue: 0,
+                        duration: 150,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(slideAnim, {
+                        toValue: 0,
+                        duration: 200,
+                        useNativeDriver: true,
+                    }),
+                ]).start();
+            }
+        }, [modalVisible, fadeAnim, slideAnim]);
 
         const filteredOptions = useMemo(() => {
             if (!searchQuery.trim()) return options;
@@ -66,14 +109,12 @@ const SelectField = forwardRef<SelectFieldRef, SelectFieldProps>(
             if (item.disabled) return;
 
             if (multiple) {
-                // Handle multiple selection
                 const currentValues = Array.isArray(selectedValue) ? selectedValue : [];
                 const newValue = currentValues.includes(item.value)
                     ? currentValues.filter(v => v !== item.value)
                     : [...currentValues, item.value];
                 (onValueChange as (value: (string | number)[]) => void)(newValue);
             } else {
-                // Handle single selection
                 (onValueChange as (value: string | number | null) => void)(item.value);
                 setModalVisible(false);
                 setSearchQuery('');
@@ -102,12 +143,28 @@ const SelectField = forwardRef<SelectFieldRef, SelectFieldProps>(
             }
         };
 
+        const handleCloseModal = () => {
+            setModalVisible(false);
+            setSearchQuery('');
+        };
+
+        // Animation interpolations
+        const modalTranslateY = slideAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [WINDOW_HEIGHT, 0],
+        });
+
+        const modalOpacity = fadeAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, 1],
+        });
+
         const renderItem = ({ item }: { item: SelectOption }) => (
             <TouchableOpacity
                 style={[
-                    styles.item,
+                    styles.optionItem,
                     itemStyle,
-                    isSelected(item) && [styles.selectedItem, selectedItemStyle],
+                    isSelected(item) && [styles.selectedOption, selectedItemStyle],
                     item.disabled && styles.disabledItem
                 ]}
                 onPress={() => handleSelect(item)}
@@ -115,11 +172,12 @@ const SelectField = forwardRef<SelectFieldRef, SelectFieldProps>(
             >
                 <Text
                     style={[
-                        styles.itemText,
+                        styles.optionText,
                         itemTextStyle,
-                        isSelected(item) && [styles.selectedItemText, selectedItemTextStyle],
+                        isSelected(item) && [styles.selectedOptionText, selectedItemTextStyle],
                         item.disabled && styles.disabledItemText
                     ]}
+                    numberOfLines={1}
                 >
                     {item.label}
                 </Text>
@@ -131,21 +189,21 @@ const SelectField = forwardRef<SelectFieldRef, SelectFieldProps>(
 
         return (
             <View style={[styles.container, containerStyle]}>
-                {label && <Text style={styles.label}>{label}</Text>}
+                {label && <Text style={[styles.label, error && styles.labelError]}>{label}</Text>}
 
                 <TouchableOpacity
                     style={[
-                        styles.selectButton,
+                        styles.selectTrigger,
                         style,
                         disabled && styles.disabledButton,
-                        error && styles.errorBorder
+                        error && styles.selectTriggerError
                     ]}
                     onPress={() => !disabled && setModalVisible(true)}
                     disabled={disabled}
                 >
                     <Text
                         style={[
-                            styles.selectButtonText,
+                            styles.selectText,
                             textStyle,
                             (!selectedValue || (multiple && Array.isArray(selectedValue) && selectedValue.length === 0)) && styles.placeholderText,
                             error && styles.errorText
@@ -155,8 +213,8 @@ const SelectField = forwardRef<SelectFieldRef, SelectFieldProps>(
                         {getSelectedLabel()}
                     </Text>
                     {renderArrow?.(modalVisible) || (
-                        <Text style={[styles.arrow, modalVisible && styles.arrowOpen]}>
-                            {modalVisible ? '▲' : '▼'}
+                        <Text style={[styles.chevron, modalVisible && styles.chevronOpen]}>
+                            ▼
                         </Text>
                     )}
                 </TouchableOpacity>
@@ -166,163 +224,228 @@ const SelectField = forwardRef<SelectFieldRef, SelectFieldProps>(
                 <Modal
                     visible={modalVisible}
                     transparent
-                    animationType="fade"
-                    onRequestClose={() => {
-                        setModalVisible(false);
-                        setSearchQuery('');
-                    }}
+                    animationType="none"
+                    onRequestClose={handleCloseModal}
+                    statusBarTranslucent={true}
                 >
-                    <TouchableWithoutFeedback onPress={() => {
-                        setModalVisible(false);
-                        setSearchQuery('');
-                    }}>
-                        <View style={styles.modalOverlay}>
-                            <TouchableWithoutFeedback>
-                                <View style={[styles.dropdown, dropdownStyle]}>
-                                    {searchable && (
-                                        <View style={styles.searchContainer}>
-                                            <TextInput
-                                                ref={searchInputRef}
-                                                style={styles.searchInput}
-                                                placeholder={searchPlaceholder}
-                                                value={searchQuery}
-                                                onChangeText={setSearchQuery}
-                                                autoFocus
-                                            />
-                                        </View>
-                                    )}
+                    <View style={StyleSheet.absoluteFill}>
+                        <TouchableWithoutFeedback onPress={handleCloseModal}>
+                            <Animated.View style={[styles.backdrop, { opacity: modalOpacity }]} />
+                        </TouchableWithoutFeedback>
 
-                                    <FlatList
-                                        data={filteredOptions}
-                                        keyExtractor={(item) => item.value.toString()}
-                                        renderItem={renderItem}
-                                        ListEmptyComponent={
-                                            <Text style={styles.emptyText}>No options found</Text>
-                                        }
-                                        keyboardShouldPersistTaps="handled"
+                        <Animated.View
+                            style={[
+                                styles.modalContent,
+                                {
+                                    opacity: modalOpacity,
+                                    transform: [{ translateY: modalTranslateY }],
+                                },
+                                dropdownStyle
+                            ]}
+                        >
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>{label || 'Select an option'}</Text>
+                                <TouchableOpacity
+                                    onPress={handleCloseModal}
+                                    style={styles.closeButton}
+                                >
+                                    <Text style={styles.closeText}>✕</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {searchable && (
+                                <View style={styles.searchContainer}>
+                                    <TextInput
+                                        ref={searchInputRef}
+                                        style={styles.searchInput}
+                                        placeholder={searchPlaceholder}
+                                        value={searchQuery}
+                                        onChangeText={setSearchQuery}
+                                        autoFocus
+                                        returnKeyType="search"
                                     />
                                 </View>
-                            </TouchableWithoutFeedback>
-                        </View>
-                    </TouchableWithoutFeedback>
+                            )}
+
+                            <FlatList
+                                data={filteredOptions}
+                                keyExtractor={(item) => item.value.toString()}
+                                renderItem={renderItem}
+                                style={styles.optionsList}
+                                keyboardShouldPersistTaps="handled"
+                                initialNumToRender={20}
+                                maxToRenderPerBatch={30}
+                                windowSize={10}
+                                ListEmptyComponent={
+                                    <View style={styles.emptyContainer}>
+                                        <Text style={styles.emptyText}>No options found</Text>
+                                    </View>
+                                }
+                            />
+                        </Animated.View>
+                    </View>
                 </Modal>
             </View>
         );
     }
 );
 
-// Styles remain the same as previous implementation
 const styles = StyleSheet.create({
     container: {
+        width: '100%',
         marginVertical: 8,
     },
     label: {
-        fontSize: 16,
-        fontWeight: '600',
-        marginBottom: 4,
+        fontSize: 17,
+        fontWeight: '500',
         color: '#333',
+        marginBottom: 8,
     },
-    selectButton: {
+    labelError: {
+        color: '#ff3b30',
+    },
+    selectTrigger: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        padding: 12,
+        justifyContent: 'space-between',
         borderWidth: 1,
-        borderColor: '#ddd',
+        borderColor: '#D1D5DB',
         borderRadius: 8,
-        backgroundColor: 'white',
+        padding: 12,
+        backgroundColor: '#FFFFFF',
         minHeight: 48,
     },
     disabledButton: {
         backgroundColor: '#f5f5f5',
         opacity: 0.6,
     },
-    errorBorder: {
+    selectTriggerError: {
         borderColor: '#ff3b30',
     },
-    selectButtonText: {
-        fontSize: 16,
-        color: '#333',
+    selectText: {
         flex: 1,
+        fontSize: 16,
+        color: '#111827',
         marginRight: 8,
     },
     placeholderText: {
-        color: '#999',
+        color: '#6B7280',
     },
     errorText: {
         color: '#ff3b30',
         fontSize: 14,
         marginTop: 4,
     },
-    arrow: {
-        fontSize: 12,
-        color: '#666',
+    chevron: {
+        fontSize: 16,
+        color: '#6B7280',
     },
-    arrowOpen: {
+    chevronOpen: {
         transform: [{ rotate: '180deg' }],
     },
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 20,
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
     },
-    dropdown: {
-        width: '100%',
-        maxHeight: 400,
-        backgroundColor: 'white',
-        borderRadius: 12,
-        overflow: 'hidden',
+    modalContent: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: '#FFFFFF',
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        maxHeight: WINDOW_HEIGHT * 0.8,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: -3 },
+                shadowOpacity: 0.1,
+                shadowRadius: 4,
+            },
+            android: {
+                elevation: 8,
+            },
+        }),
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E7EB',
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#111827',
+    },
+    closeButton: {
+        padding: 8,
+    },
+    closeText: {
+        fontSize: 18,
+        color: '#6B7280',
+        fontWeight: 'bold',
     },
     searchContainer: {
-        padding: 12,
+        padding: 16,
         borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
+        borderBottomColor: '#E5E7EB',
     },
     searchInput: {
-        padding: 8,
         borderWidth: 1,
-        borderColor: '#ddd',
-        borderRadius: 6,
+        borderColor: '#D1D5DB',
+        borderRadius: 8,
+        padding: 12,
         fontSize: 16,
+        backgroundColor: '#F9FAFB',
     },
-    item: {
+    optionsList: {
+        maxHeight: WINDOW_HEIGHT * 0.5,
+        paddingBottom: 20
+    },
+    optionItem: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: 16,
         borderBottomWidth: 1,
-        borderBottomColor: '#f5f5f5',
+        borderBottomColor: '#F3F4F6',
     },
-    selectedItem: {
-        backgroundColor: '#e3f2fd',
+    selectedOption: {
+        backgroundColor: '#1aa950',
+        borderRadius: 8,
+        margin: 4,
     },
     disabledItem: {
         opacity: 0.5,
     },
-    itemText: {
+    optionText: {
         fontSize: 16,
-        color: '#333',
+        color: '#374151',
         flex: 1,
     },
-    selectedItemText: {
-        color: '#1976d2',
-        fontWeight: '600',
+    selectedOptionText: {
+        color: '#FFFFFF',
+        fontWeight: '500',
     },
     disabledItemText: {
         color: '#999',
     },
     checkmark: {
-        color: '#1976d2',
+        color: '#FFFFFF',
         fontSize: 16,
         fontWeight: 'bold',
     },
+    emptyContainer: {
+        padding: 32,
+        alignItems: 'center',
+    },
     emptyText: {
-        textAlign: 'center',
-        padding: 20,
-        color: '#999',
         fontSize: 16,
+        color: '#6B7280',
     },
 });
 

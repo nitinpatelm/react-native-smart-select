@@ -83,6 +83,7 @@ const App = () => {
         onValueChange={(v: any) => setSelectedHobbies(v)}
         placeholder="Inline multi select"
         label="Inline Multi Select"
+        searchable
       />
     </ScrollView>
   );
